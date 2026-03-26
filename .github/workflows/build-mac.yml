@@ -48,16 +48,40 @@ jobs:
 
       - name: Create DMG
         run: |
-          # 创建临时目录并复制 .app
           mkdir -p dmg_temp
           cp -R "dist/桌面待办.app" dmg_temp/
-          # 添加 Applications 快捷方式
           ln -s /Applications dmg_temp/Applications
-          # 创建 DMG
           hdiutil create -volname "桌面待办" \
             -srcfolder dmg_temp \
             -ov -format UDZO \
             "桌面待办-v1.5-macOS.dmg"
+
+      - name: Create PKG installer
+        run: |
+          # 1) 创建 payload 目录结构（安装到 /Applications）
+          mkdir -p pkg_root/Applications
+          cp -R "dist/桌面待办.app" pkg_root/Applications/
+
+          # 2) 构建组件包
+          pkgbuild \
+            --root pkg_root \
+            --identifier com.desktoptodo.app.pkg \
+            --version 1.5.0 \
+            --install-location / \
+            DesktopTodo.pkg
+
+          # 3) 用 distribution.xml 生成带向导的安装包（可选安装位置）
+          productbuild \
+            --distribution installer/distribution.xml \
+            --package-path . \
+            --resources . \
+            "桌面待办-v1.5-macOS-Installer.pkg"
+
+      - name: Upload PKG installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: DesktopTodo-macOS-PKG
+          path: "桌面待办-v1.5-macOS-Installer.pkg"
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
