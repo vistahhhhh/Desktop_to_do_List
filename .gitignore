@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.spec.bak
+
+# PyInstaller
+installer_output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data (user-specific)
+data/
+config.json
+crash.log
+
+# OS
+.DS_Store
+Thumbs.db

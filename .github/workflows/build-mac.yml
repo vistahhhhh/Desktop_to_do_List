@@ -1,0 +1,72 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install PyQt5>=5.15.0 SQLAlchemy>=2.0.0
+
+      - name: Convert PNG icon to ICNS
+        run: |
+          # 创建 iconset 目录
+          mkdir -p app_icon.iconset
+          # 用 sips 生成各尺寸图标
+          sips -z 16 16     "app图标.png" --out app_icon.iconset/icon_16x16.png
+          sips -z 32 32     "app图标.png" --out app_icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     "app图标.png" --out app_icon.iconset/icon_32x32.png
+          sips -z 64 64     "app图标.png" --out app_icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   "app图标.png" --out app_icon.iconset/icon_128x128.png
+          sips -z 256 256   "app图标.png" --out app_icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   "app图标.png" --out app_icon.iconset/icon_256x256.png
+          sips -z 512 512   "app图标.png" --out app_icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   "app图标.png" --out app_icon.iconset/icon_512x512.png
+          sips -z 1024 1024 "app图标.png" --out app_icon.iconset/icon_512x512@2x.png
+          # 生成 .icns 文件
+          iconutil -c icns app_icon.iconset -o app_icon.icns
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller build_mac.spec
+
+      - name: Create DMG
+        run: |
+          # 创建临时目录并复制 .app
+          mkdir -p dmg_temp
+          cp -R "dist/桌面待办.app" dmg_temp/
+          # 添加 Applications 快捷方式
+          ln -s /Applications dmg_temp/Applications
+          # 创建 DMG
+          hdiutil create -volname "桌面待办" \
+            -srcfolder dmg_temp \
+            -ov -format UDZO \
+            "桌面待办-v1.5-macOS.dmg"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DesktopTodo-macOS-DMG
+          path: "桌面待办-v1.5-macOS.dmg"
+
+      - name: Upload .app artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DesktopTodo-macOS-App
+          path: "dist/桌面待办.app"
