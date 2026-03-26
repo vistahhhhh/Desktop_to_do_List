@@ -34,7 +34,7 @@ class SettingsPanel(QDialog):
 
     def _setup_window(self):
         self.setWindowTitle("设置")
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedWidth(300)
 

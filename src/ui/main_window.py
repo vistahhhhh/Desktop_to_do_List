@@ -569,10 +569,39 @@ class MainWindow(QMainWindow):
             self.task_service.delete_task(task_id)
             self._refresh_tasks()
 
+    def _make_dialog_draggable(self, dialog):
+        """为弹窗添加拖拽移动支持"""
+        dialog._drag_pos = None
+        _orig_press = dialog.mousePressEvent
+        _orig_move = dialog.mouseMoveEvent
+        _orig_release = dialog.mouseReleaseEvent
+
+        def mousePressEvent(event):
+            if event.button() == Qt.LeftButton:
+                dialog._drag_pos = event.globalPos()
+            else:
+                _orig_press(event)
+
+        def mouseMoveEvent(event):
+            if dialog._drag_pos:
+                delta = event.globalPos() - dialog._drag_pos
+                dialog.move(dialog.pos() + delta)
+                dialog._drag_pos = event.globalPos()
+            else:
+                _orig_move(event)
+
+        def mouseReleaseEvent(event):
+            dialog._drag_pos = None
+            _orig_release(event)
+
+        dialog.mousePressEvent = mousePressEvent
+        dialog.mouseMoveEvent = mouseMoveEvent
+        dialog.mouseReleaseEvent = mouseReleaseEvent
+
     def _show_confirm(self, message: str) -> bool:
         """显示自定义主题确认弹窗"""
         dialog = QDialog(self)
-        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         dialog.setAttribute(Qt.WA_TranslucentBackground)
         dialog.setFixedWidth(340)
 
@@ -631,7 +660,8 @@ class MainWindow(QMainWindow):
         deleted = self.task_service.get_deleted_tasks()
 
         dialog = QDialog(self)
-        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self._make_dialog_draggable(dialog)
         dialog.setAttribute(Qt.WA_TranslucentBackground)
         dialog.setFixedWidth(400)
         dialog.setMinimumHeight(300)
@@ -752,7 +782,8 @@ class MainWindow(QMainWindow):
             grouped[yesterday] = []
 
         dialog = QDialog(self)
-        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self._make_dialog_draggable(dialog)
         dialog.setAttribute(Qt.WA_TranslucentBackground)
         dialog.setFixedWidth(400)
         dialog.setMinimumHeight(350)
@@ -955,7 +986,7 @@ class MainWindow(QMainWindow):
         theme = self._current_theme()
 
         dialog = QDialog(self)
-        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         dialog.setAttribute(Qt.WA_TranslucentBackground)
         dialog.setFixedWidth(340)
 
