@@ -167,14 +167,38 @@ class TaskService:
         )
 
     def carry_forward(self, task_id: int) -> Optional[Task]:
-        """将遗留任务移交到今日"""
-        task = self.get_task(task_id)
-        if task is None:
+        """
+        将遗留任务移交到今日：
+        1. 创建新任务副本，task_date设为今天
+        2. 原任务保留在原日期，状态改为done（这样历史回顾中仍能看到）
+        """
+        original_task = self.get_task(task_id)
+        if original_task is None:
             return None
-        task.task_date = date.today()
-        task.updated_at = datetime.now(timezone.utc)
+        
+        # 创建新任务副本
+        new_task = Task(
+            title=original_task.title,
+            description=original_task.description,
+            task_type=original_task.task_type,
+            due_date=original_task.due_date,
+            priority=original_task.priority,
+            status=Task.STATUS_TODO,  # 新任务状态为待办
+            task_date=date.today(),   # 移交到今日
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        
+        # 复制标签关系
+        new_task.tags = list(original_task.tags)
+        
+        # 原任务标记为已完成（保留在历史回顾中）
+        original_task.status = Task.STATUS_DONE
+        original_task.updated_at = datetime.now(timezone.utc)
+        
+        self._session.add(new_task)
         self._session.commit()
-        return task
+        return new_task
 
     def get_history_tasks(self, max_days: int = 10):
         """获取最近 max_days 天的已过去今日任务，按日期分组（不含今天，不含分任务）"""

@@ -8,6 +8,13 @@ def hex_to_rgba(hex_color: str, opacity: float) -> str:
     return f"rgba({r},{g},{b},{opacity})"
 
 
+def _is_dark_color(hex_color: str) -> bool:
+    """判断颜色是否为深色（用于 tooltip 等需要区分明暗的场景）"""
+    c = hex_color.lstrip("#")
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    return (r * 299 + g * 587 + b * 114) / 1000 < 128
+
+
 class Theme:
     """单个主题定义"""
 
@@ -144,12 +151,28 @@ def build_stylesheet(theme: Theme, bg_opacity: float = None,
     border_rgba = hex_to_rgba(theme.border_color, min(1.0, op + 0.1))
     hover_rgba = hex_to_rgba(theme.hover_color, min(1.0, op + 0.1))
     fs = font_size if font_size is not None else DEFAULT_FONT_SIZE
+    # QToolTip 颜色：浅色主题用米白底+黑字，深色主题用黑底+白字
+    if _is_dark_color(theme.bg_color):
+        _tt_bg = "#1A1A1A"
+        _tt_fg = "#FFFFFF"
+        _tt_bd = "#555555"
+    else:
+        _tt_bg = "#FFFDF5"
+        _tt_fg = "#333333"
+        _tt_bd = "#D5CDBA"
     return f"""
     /* ===== 全局 ===== */
     QWidget {{
         font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
         font-size: {fs}px;
         color: {theme.text_color};
+    }}
+    QToolTip {{
+        background-color: {_tt_bg};
+        color: {_tt_fg};
+        border: 1px solid {_tt_bd};
+        padding: 1px 3px;
+        font-size: {max(10, fs - 2)}px;
     }}
     QLineEdit {{
         color: {theme.text_color};
@@ -875,5 +898,309 @@ def build_stylesheet(theme: Theme, bg_opacity: float = None,
     #HistoryTodo {{
         font-size: {max(10, fs - 1)}px;
         color: {theme.text_secondary};
+    }}
+
+    /* ===== Tab 切换（标题栏左侧） ===== */
+    #TodoTabActive, #NoteTabActive {{
+        background-color: {hover_rgba};
+        border: none;
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+        border-bottom-left-radius: 0px;
+        border-bottom-right-radius: 0px;
+        font-size: {fs + 1}px;
+        font-weight: bold;
+        color: {theme.text_color};
+        padding: 4px 10px;
+    }}
+    #TodoTabInactive, #NoteTabInactive {{
+        background: transparent;
+        border: none;
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+        border-bottom-left-radius: 0px;
+        border-bottom-right-radius: 0px;
+        font-size: {max(10, fs - 1)}px;
+        font-weight: normal;
+        color: {theme.text_secondary};
+        padding: 4px 10px;
+    }}
+    #TodoTabInactive:hover, #NoteTabInactive:hover {{
+        background-color: {hex_to_rgba(theme.hover_color, 0.5)};
+        color: {theme.text_color};
+    }}
+
+    /* ===== 便签面板 ===== */
+    #NoteFormatCard {{
+        background-color: {card_rgba};
+        border: 1px solid {border_rgba};
+        border-radius: 8px;
+        margin: 0 4px 0 0;
+    }}
+    #NoteFormatBtn {{
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+        color: {theme.text_color};
+        font-size: {fs}px;
+        padding: 2px;
+    }}
+    #NoteFormatBtn:hover {{
+        color: {theme.text_color};
+        background-color: {hex_to_rgba(theme.text_secondary, 0.25)};
+    }}
+    #NoteFormatBtn:checked {{
+        background-color: {theme.primary_color};
+        color: #FFFFFF;
+    }}
+    #NoteFormatToggleBtn {{
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        color: {theme.text_secondary};
+        font-size: {max(10, fs - 1)}px;
+        padding: 0;
+    }}
+    #NoteFormatToggleBtn:hover {{
+        background-color: {hover_rgba};
+        color: {theme.text_color};
+    }}
+    #NoteTitleInput {{
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 6px 12px 2px 12px;
+        font-size: {fs + 1}px;
+        font-weight: bold;
+        color: {theme.text_color};
+    }}
+    #NoteTitleInput:focus, #NoteTitleInput:hover {{
+        background: transparent;
+        color: {theme.text_color};
+    }}
+    #NoteBodyEdit {{
+        background: transparent;
+        border: none;
+        padding: 2px 12px 8px 12px;
+        font-size: {fs}px;
+        color: {theme.text_color};
+    }}
+    #NoteBodyEdit:focus, #NoteBodyEdit:hover {{
+        background: transparent;
+    }}
+    #NoteBottomContainer {{
+        background: transparent;
+        border: none;
+    }}
+    #NoteListPanel {{
+        background-color: {card_rgba};
+        border: 1px solid {border_rgba};
+        border-radius: 8px;
+    }}
+    #NoteListDragHandle {{
+        background-color: {hex_to_rgba(theme.border_color, 0.3)};
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+    }}
+    #NoteListDragHandle:hover {{
+        background-color: {hex_to_rgba(theme.border_color, 0.5)};
+    }}
+    #NoteSearchContainer {{
+        background: transparent;
+    }}
+    #NoteSearchIcon {{
+        color: {theme.text_secondary};
+        font-size: {fs}px;
+    }}
+    #NoteSearchInput {{
+        background-color: {hex_to_rgba(theme.hover_color, 0.3)};
+        border: 1px solid {hex_to_rgba(theme.border_color, 0.5)};
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: {fs - 1}px;
+        color: {theme.text_color};
+    }}
+    #NoteSearchInput:focus {{
+        background-color: {hex_to_rgba(theme.hover_color, 0.4)};
+        border-color: {theme.border_color};
+    }}
+    #NoteSearchCount {{
+        color: {theme.text_secondary};
+        font-size: {fs - 2}px;
+    }}
+    #NoteSearchClearBtn {{
+        background: transparent;
+        border: none;
+        color: {theme.text_secondary};
+        font-size: {fs - 1}px;
+        border-radius: 3px;
+    }}
+    #NoteSearchClearBtn:hover {{
+        background-color: {hex_to_rgba(theme.priority_high, 0.8)};
+        color: #FFFFFF;
+    }}
+    #FloatingNoteContainer {{
+        background-color: {bg_rgba};
+        border: 1px solid {border_rgba};
+        border-radius: 12px;
+    }}
+    #FloatingNoteTitleBar {{
+        background-color: transparent;
+        border-top-left-radius: 12px;
+        border-top-right-radius: 12px;
+        border-bottom: 1px solid {border_rgba};
+    }}
+    #FloatingNoteTitleLabel {{
+        font-size: {max(10, fs - 1)}px;
+        font-weight: bold;
+        color: {theme.text_secondary};
+        background: transparent;
+    }}
+    #FloatingNoteCloseBtn {{
+        background: transparent;
+        border: none;
+        color: {theme.text_secondary};
+        font-size: {fs}px;
+        border-radius: 4px;
+    }}
+    #FloatingNoteCloseBtn:hover {{
+        background-color: {theme.priority_high};
+        color: #FFFFFF;
+    }}
+    #FloatingNotePinBtn {{
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+    }}
+    #FloatingNotePinBtn:hover {{
+        background-color: {hex_to_rgba(theme.hover_color, 0.3)};
+    }}
+    #FloatingNotePinBtnActive {{
+        background-color: {theme.primary_color};
+        border: none;
+        border-radius: 4px;
+    }}
+    #FloatingNotePinBtnActive:hover {{
+        background-color: {hex_to_rgba(theme.primary_color, 0.8)};
+    }}
+    #FloatingNoteTitleInput {{
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 4px 12px;
+        font-size: {fs}px;
+        font-weight: bold;
+        color: {theme.text_color};
+    }}
+    #FloatingNoteTitleInput:focus, #FloatingNoteTitleInput:hover {{
+        background: transparent;
+        color: {theme.text_color};
+    }}
+    #FloatingNoteTitleInput::placeholder {{
+        color: {theme.text_secondary};
+    }}
+    #FloatingNoteBodyEdit {{
+        background: transparent;
+        border: none;
+        padding: 2px 12px 8px 12px;
+        font-size: {fs}px;
+        color: {theme.text_color};
+    }}
+    #FloatingNoteBodyEdit:focus, #FloatingNoteBodyEdit:hover {{
+        background: transparent;
+    }}
+    #FloatingNoteBodyEdit::placeholder {{
+        color: {theme.text_secondary};
+    }}
+    #NoteListScroll {{
+        background: transparent;
+        border: none;
+    }}
+    #NoteListScroll > QWidget {{
+        background: transparent;
+    }}
+    #NoteListScrollContent {{
+        background: transparent;
+    }}
+    #NoteListHeader {{
+        background: transparent;
+        border-bottom: 1px solid {border_rgba};
+    }}
+    #NoteListHeaderLabel {{
+        font-size: {max(10, fs - 1)}px;
+        font-weight: bold;
+        color: {theme.text_secondary};
+    }}
+    #NoteListItem {{
+        background: transparent;
+        border-bottom: 1px solid {hex_to_rgba(theme.border_color, 0.4)};
+    }}
+    #NoteListItem:hover {{
+        background-color: {hover_rgba};
+    }}
+    #NoteListItemActive {{
+        background-color: {hex_to_rgba(theme.primary_color, 0.12)};
+        border-bottom: 1px solid {hex_to_rgba(theme.border_color, 0.4)};
+    }}
+    #NoteListItemLabel {{
+        font-size: {fs}px;
+        color: {theme.text_color};
+    }}
+    #NoteListItemDate {{
+        font-size: {max(10, fs - 2)}px;
+        color: {theme.text_secondary};
+    }}
+    #NoteListDelBtn {{
+        background: transparent;
+        border: none;
+        color: {theme.text_secondary};
+        font-size: {max(10, fs - 2)}px;
+        border-radius: 3px;
+        padding: 0;
+    }}
+    #NoteListDelBtn:hover {{
+        color: {theme.priority_high};
+        background-color: {hover_rgba};
+    }}
+    #NoteBottomBar {{
+        background: transparent;
+    }}
+    #NoteAddBtn {{
+        background: transparent;
+        border: 1px solid {border_rgba};
+        border-radius: 6px;
+        color: {theme.primary_color};
+        font-size: {fs + 2}px;
+        font-weight: bold;
+    }}
+    #NoteAddBtn:hover {{
+        background-color: {theme.primary_color};
+        border-color: {theme.primary_color};
+        color: #FFFFFF;
+    }}
+    #NoteCurrentBtn {{
+        background: transparent;
+        border: 1px solid {border_rgba};
+        border-radius: 6px;
+        color: {theme.text_secondary};
+        font-size: {max(10, fs - 1)}px;
+        text-align: left;
+        padding: 4px 10px;
+    }}
+    #NoteCurrentBtn:hover {{
+        background-color: {hover_rgba};
+        color: {theme.text_color};
+    }}
+    #NoteDelBtn {{
+        background: transparent;
+        border: 1px solid {border_rgba};
+        border-radius: 6px;
+        color: {theme.text_secondary};
+        font-size: {fs}px;
+    }}
+    #NoteDelBtn:hover {{
+        background-color: {hover_rgba};
+        border-color: {theme.priority_high};
+        color: {theme.priority_high};
     }}
     """

@@ -21,20 +21,12 @@ def get_user_data_root() -> Path:
     """
     获取用户数据根目录（数据库、配置文件等）。
     - 开发环境：项目根目录
-    - PyInstaller 打包后：
-        - Windows: %LOCALAPPDATA%/桌面待办/
-        - macOS:   ~/Library/Application Support/桌面待办/
-        - Linux:   ~/.local/share/桌面待办/
+    - PyInstaller 打包后：%LOCALAPPDATA%/桌面待办/（始终可写）
     """
     if getattr(sys, 'frozen', False):
-        if sys.platform == "win32":
-            local_app = os.environ.get("LOCALAPPDATA")
-            if local_app:
-                return Path(local_app) / "桌面待办"
-        elif sys.platform == "darwin":
-            return Path.home() / "Library" / "Application Support" / "桌面待办"
-        else:
-            return Path.home() / ".local" / "share" / "桌面待办"
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            return Path(local_app) / "桌面待办"
         return Path(sys.executable).resolve().parent
     else:
         return Path(__file__).resolve().parent.parent.parent

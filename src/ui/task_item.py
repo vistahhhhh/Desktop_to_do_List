@@ -1,6 +1,8 @@
 """任务项组件 - 显示单个任务，支持状态切换和分任务"""
 
+import json
 from datetime import date
+from pathlib import Path
 
 from PyQt5.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QWidget,
@@ -29,8 +31,32 @@ PRIORITY_LABELS = {
 
 WEEKDAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
-# 全局折叠状态缓存：task_id -> bool (True=展开)，跨刷新保持用户最后操作状态
-_SUBTASK_EXPAND_STATE: dict = {}
+# 全局折叠状态缓存：task_id -> bool (True=展开)，跨刷新 + 跨启动保持用户操作状态
+def _expand_state_path() -> Path:
+    from src.utils.paths import get_user_data_root
+    return get_user_data_root() / "subtask_expand_state.json"
+
+
+def _load_expand_state() -> dict:
+    try:
+        p = _expand_state_path()
+        if p.exists():
+            return {int(k): bool(v) for k, v in json.loads(p.read_text("utf-8")).items()}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_expand_state(state: dict):
+    try:
+        p = _expand_state_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({str(k): v for k, v in state.items()}), encoding="utf-8")
+    except Exception:
+        pass
+
+
+_SUBTASK_EXPAND_STATE: dict = _load_expand_state()
 
 
 # ============================================================
@@ -351,8 +377,8 @@ class TaskItemWidget(QFrame):
         # ---- 主任务行 ----
         main_row = QWidget()
         layout = QHBoxLayout(main_row)
-        layout.setContentsMargins(2, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(1)
 
         if self._is_carryover:
             self.status_btn = None
@@ -407,11 +433,19 @@ class TaskItemWidget(QFrame):
                 self._toggle_btn.clicked.connect(self._toggle_subtask_section)
                 layout.addWidget(self._toggle_btn, 0, Qt.AlignTop)
 
+            right_box = QWidget()
+            right_box_layout = QHBoxLayout(right_box)
+            right_box_layout.setContentsMargins(0, 0, 0, 0)
+            right_box_layout.setSpacing(0)
+
             self.date_label = QLabel("")
             self.date_label.setObjectName("TaskMeta")
             self.date_label.setWordWrap(False)
+            self.date_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.date_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+            self.date_label.setMinimumWidth(0)
             self._update_date_label()
-            layout.addWidget(self.date_label, 0, Qt.AlignTop)
+            right_box_layout.addWidget(self.date_label)
 
             priority_text = PRIORITY_LABELS.get(self.task.priority, "")
             if priority_text:
@@ -422,7 +456,10 @@ class TaskItemWidget(QFrame):
                     "low": "PriorityLow",
                 }.get(self.task.priority, "PriorityMedium")
                 priority_label.setObjectName(obj_name)
-                layout.addWidget(priority_label, 0, Qt.AlignTop)
+                priority_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+                right_box_layout.addWidget(priority_label)
+
+            layout.addWidget(right_box, 0, Qt.AlignRight | Qt.AlignTop)
 
         desc = getattr(self.task, 'description', None)
         if desc and desc.strip():
@@ -450,6 +487,7 @@ class TaskItemWidget(QFrame):
     def _toggle_subtask_section(self):
         self._subtasks_expanded = not self._subtasks_expanded
         _SUBTASK_EXPAND_STATE[self.task.id] = self._subtasks_expanded
+        _save_expand_state(_SUBTASK_EXPAND_STATE)
         if self._subtask_section:
             self._subtask_section.setVisible(self._subtasks_expanded)
         if self._toggle_btn:
@@ -560,6 +598,14 @@ class TaskItemWidget(QFrame):
         self.title_label.style().unpolish(self.title_label)
         self.title_label.style().polish(self.title_label)
         self._update_date_label()
+        # 划去任务时自动收回分任务区块
+        if new_status in ("done", "cancelled") and self._subtasks_expanded and self._subtask_section:
+            self._subtasks_expanded = False
+            _SUBTASK_EXPAND_STATE[self.task.id] = False
+            _save_expand_state(_SUBTASK_EXPAND_STATE)
+            self._subtask_section.setVisible(False)
+            if self._toggle_btn:
+                self._toggle_btn.setText(self._progress_text())
         self.status_changed.emit(self.task.id, new_status)
 
     # ---- 鼠标事件 ----

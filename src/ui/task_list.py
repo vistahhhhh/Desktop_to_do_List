@@ -41,6 +41,7 @@ class InlineTaskInput(QWidget):
         self.input = QLineEdit()
         self.input.setObjectName("InlineTaskInput")
         self.input.setPlaceholderText("输入内容，回车添加")
+        self.input.setAcceptDrops(False)
         self.input.returnPressed.connect(self._on_submit)
         layout.addWidget(self.input)
 
@@ -131,7 +132,7 @@ class TaskListWidget(QWidget):
         self.container.dragMoveEvent = self._drag_move
         self.container.dropEvent = self._drop
         self._list_layout = QVBoxLayout(self.container)
-        self._list_layout.setContentsMargins(6, 0, 6, 0)
+        self._list_layout.setContentsMargins(4, 0, 4, 0)
         self._list_layout.setSpacing(0)
         self._list_layout.setAlignment(Qt.AlignTop)
 

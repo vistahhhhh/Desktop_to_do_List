@@ -3,10 +3,10 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QGraphicsDropShadowEffect, QSizePolicy,
-    QApplication, QDialog, QFrame, QScrollArea,
+    QApplication, QDialog, QFrame, QScrollArea, QToolTip, QStackedWidget,
 )
-from PyQt5.QtCore import Qt, QPoint, QSize, QRect, pyqtSignal, QEvent
-from PyQt5.QtGui import QColor, QCursor, QIcon, QPalette, QPen, QPainter, QPixmap
+from PyQt5.QtCore import Qt, QPoint, QSize, QRect, pyqtSignal, QEvent, QTimer
+from PyQt5.QtGui import QColor, QCursor, QIcon, QPalette, QPen, QPainter, QPixmap, QFont
 
 from src.models.database import init_db, get_session
 from src.models.task import Task
@@ -14,17 +14,48 @@ from src.services.task_service import TaskService
 from src.services.tag_service import TagService
 from src.services.filter_service import FilterService
 from src.utils.config_manager import ConfigManager
-from src.ui.styles.themes import get_theme, build_stylesheet, DEFAULT_THEME_KEY, DEFAULT_FONT_SIZE
+from src.ui.styles.themes import get_theme, build_stylesheet, DEFAULT_THEME_KEY, DEFAULT_FONT_SIZE, _is_dark_color
 from src.ui.tag_sidebar import TagSidebar
 from src.ui.task_list import TaskListWidget
 from src.ui.task_editor import TaskEditorDialog
 from src.ui.settings_panel import SettingsPanel
 from src.ui.system_tray import SystemTray
+from src.ui.note_panel import NotePanel
+from src.services.note_service import NoteService
+from src.ui.floating_note import FloatingNoteWindow
 
 RESIZE_MARGIN = 6
 CORNER_MARGIN = 16
 MIN_WIDTH = 300
 MIN_HEIGHT = 450
+
+
+class _StyledTip(QLabel):
+    """完全自定义的 Tooltip，绕过 Qt 系统 QToolTip 颜色机制"""
+
+    def __init__(self):
+        super().__init__(flags=Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+
+    def show_tip(self, global_pos, text, is_dark, font_size):
+        if is_dark:
+            bg, fg, bd = "#1A1A1A", "#FFFFFF", "#555555"
+        else:
+            bg, fg, bd = "#FFFDF5", "#333333", "#D5CDBA"
+        self.setStyleSheet(
+            f"QLabel {{ background-color: {bg}; color: {fg}; "
+            f"border: 1px solid {bd}; padding: 1px 4px; "
+            f"font-family: 'Microsoft YaHei'; font-size: {font_size}px; }}"
+        )
+        self.setText(text)
+        self.adjustSize()
+        self.move(global_pos.x() + 14, global_pos.y() + 18)
+        self.show()
+        self._timer.start(3000)
 
 
 class MainWindow(QMainWindow):
@@ -39,6 +70,7 @@ class MainWindow(QMainWindow):
         self.task_service = TaskService(self._session)
         self.tag_service = TagService(self._session)
         self.filter_service = FilterService(self._session)
+        self.note_service = NoteService(self._session)
         self.config = ConfigManager()
 
         # 窗口状态
@@ -47,6 +79,13 @@ class MainWindow(QMainWindow):
         self._resize_edge = None
         self._resize_start_pos = None
         self._resize_start_geo = None
+        self._styled_tip = _StyledTip()
+
+        # 便签拖出状态
+        self._floating_notes = []       # 所有已弹出的独立便签窗口
+        self._note_drag_start = None    # 拖出操作的起始全局坐标
+        self._note_dragging = False     # 是否进入拖出状态
+        self._note_drag_ghost = None    # 拖动预览幽灵窗口
 
         # 加载主题
         theme_key = self.config.get("theme.mode", DEFAULT_THEME_KEY)
@@ -68,7 +107,8 @@ class MainWindow(QMainWindow):
 
     def _setup_window(self):
         self._always_on_top = self.config.get("window.always_on_top", True)
-        flags = Qt.FramelessWindowHint | Qt.Tool
+        # 使用更合适的窗口标志：去掉Qt.Tool，改用Qt.Window以获得更好的前台显示行为
+        flags = Qt.FramelessWindowHint | Qt.Window
         if self._always_on_top:
             flags |= Qt.WindowStaysOnTopHint
         self.setWindowFlags(flags)
@@ -121,11 +161,14 @@ class MainWindow(QMainWindow):
         title_bar = self._build_title_bar()
         container_layout.addWidget(title_bar)
 
-        # --- 内容区（左侧标签栏 + 右侧任务列表） ---
-        content = QWidget()
-        content_layout = QHBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
+        # --- 内容区：QStackedWidget（page0=待办，page1=便签） ---
+        self.content_stack = QStackedWidget()
+
+        # -- Page 0: 左侧标签栏 + 右侧任务列表 --
+        todo_page = QWidget()
+        todo_layout = QHBoxLayout(todo_page)
+        todo_layout.setContentsMargins(0, 0, 0, 0)
+        todo_layout.setSpacing(0)
 
         # 左侧标签栏
         self.sidebar = TagSidebar()
@@ -134,7 +177,7 @@ class MainWindow(QMainWindow):
         self.sidebar.tag_edit_requested.connect(self._on_tag_edit)
         self.sidebar.tag_create_requested.connect(self._on_tag_create)
         self.sidebar.history_requested.connect(self._on_open_history)
-        content_layout.addWidget(self.sidebar)
+        todo_layout.addWidget(self.sidebar)
 
         # 右侧内容
         right = QWidget()
@@ -196,9 +239,14 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.trash_btn, 0)
 
         right_layout.addWidget(btn_wrapper)
+        todo_layout.addWidget(right, 1)
+        self.content_stack.addWidget(todo_page)  # index 0
 
-        content_layout.addWidget(right, 1)
-        container_layout.addWidget(content, 1)
+        # -- Page 1: 便签面板 --
+        self.note_panel = NotePanel(self.note_service)
+        self.content_stack.addWidget(self.note_panel)  # index 1
+
+        container_layout.addWidget(self.content_stack, 1)
 
         root_layout.addWidget(self.main_container)
 
@@ -216,9 +264,32 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 6, 8, 6)
         layout.setSpacing(6)
 
-        title = QLabel("桌面待办")
-        title.setObjectName("TitleLabel")
-        layout.addWidget(title)
+        # --- Tab 切换按钮（底部对齐） ---
+        tab_area = QWidget()
+        tab_layout = QHBoxLayout(tab_area)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(6)
+        tab_layout.setAlignment(Qt.AlignBottom)
+
+        self.todo_tab_btn = QPushButton("桌面待办")
+        self.todo_tab_btn.setObjectName("TodoTabActive")
+        self.todo_tab_btn.setFlat(True)
+        self.todo_tab_btn.setCursor(Qt.PointingHandCursor)
+        self.todo_tab_btn.clicked.connect(self._switch_to_todo)
+        tab_layout.addWidget(self.todo_tab_btn)
+
+        self.note_tab_btn = QPushButton("便签")
+        self.note_tab_btn.setObjectName("NoteTabInactive")
+        self.note_tab_btn.setFlat(True)
+        self.note_tab_btn.setCursor(Qt.PointingHandCursor)
+        self.note_tab_btn.clicked.connect(self._switch_to_note)
+        # 覆写鼠标事件以支持拖出便签
+        self.note_tab_btn.mousePressEvent = self._note_tab_btn_press
+        self.note_tab_btn.mouseMoveEvent = self._note_tab_btn_move
+        self.note_tab_btn.mouseReleaseEvent = self._note_tab_btn_release
+        tab_layout.addWidget(self.note_tab_btn)
+
+        layout.addWidget(tab_area, 0, Qt.AlignBottom)
         layout.addStretch()
 
         # 置顶图钉按钮
@@ -255,6 +326,148 @@ class MainWindow(QMainWindow):
         layout.addWidget(close_btn)
 
         return bar
+
+    # ========== Tab 切换 ==========
+
+    def _switch_to_todo(self):
+        self.note_panel.flush_on_hide()
+        self.content_stack.setCurrentIndex(0)
+        self.todo_tab_btn.setObjectName("TodoTabActive")
+        self.note_tab_btn.setObjectName("NoteTabInactive")
+        self.todo_tab_btn.style().unpolish(self.todo_tab_btn)
+        self.todo_tab_btn.style().polish(self.todo_tab_btn)
+        self.note_tab_btn.style().unpolish(self.note_tab_btn)
+        self.note_tab_btn.style().polish(self.note_tab_btn)
+
+    def _switch_to_note(self):
+        self.content_stack.setCurrentIndex(1)
+        self.todo_tab_btn.setObjectName("TodoTabInactive")
+        self.note_tab_btn.setObjectName("NoteTabActive")
+        self.todo_tab_btn.style().unpolish(self.todo_tab_btn)
+        self.todo_tab_btn.style().polish(self.todo_tab_btn)
+        self.note_tab_btn.style().unpolish(self.note_tab_btn)
+        self.note_tab_btn.style().polish(self.note_tab_btn)
+        self.note_panel.on_show()
+
+    # ========== 便签 Tab 拖出检测 ==========
+
+    def _note_tab_btn_press(self, event):
+        if event.button() == Qt.LeftButton:
+            self._note_drag_start = event.globalPos()
+            self._note_dragging = False
+        event.accept()
+
+    def _note_tab_btn_move(self, event):
+        if self._note_drag_start is None:
+            event.accept()
+            return
+        delta = event.globalPos() - self._note_drag_start
+        if not self._note_dragging and delta.manhattanLength() > 20:
+            # 进入拖出状态：确保当前在便签页且有便签
+            self._note_dragging = True
+            if self.content_stack.currentIndex() != 1:
+                self._switch_to_note()
+            self._show_note_drag_ghost(event.globalPos())
+        if self._note_dragging and self._note_drag_ghost:
+            self._note_drag_ghost.move(
+                event.globalPos().x() - 60,
+                event.globalPos().y() - 20,
+            )
+        event.accept()
+
+    def _note_tab_btn_release(self, event):
+        if event.button() == Qt.LeftButton:
+            if self._note_dragging:
+                # 拖出完成：创建独立便签窗口 + 主面板新建空白便签
+                self._hide_note_drag_ghost()
+                self._detach_note(event.globalPos())
+                self._note_drag_start = None
+                self._note_dragging = False
+            else:
+                # 普通点击：切换到便签页
+                self._note_drag_start = None
+                self._switch_to_note()
+        event.accept()
+
+    def _show_note_drag_ghost(self, global_pos):
+        """创建并显示拖动中的幽灵预览窗口"""
+        if self._note_drag_ghost:
+            return
+        ghost = QFrame()
+        ghost.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        ghost.setAttribute(Qt.WA_TranslucentBackground)
+        ghost.setFixedSize(120, 70)
+
+        layout = QVBoxLayout(ghost)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
+
+        title_lbl = QLabel("便签")
+        title_lbl.setStyleSheet(
+            f"color:{self.current_theme.text_color}; font-weight:bold; "
+            f"background:transparent; border:none;"
+        )
+        layout.addWidget(title_lbl)
+
+        note_id = self.note_panel.get_current_note_id()
+        if note_id:
+            note = self.note_service.get_by_id(note_id)
+            if note:
+                sub_lbl = QLabel(note.display_name() or "（无标题）")
+                sub_lbl.setStyleSheet(
+                    f"color:{self.current_theme.text_secondary}; "
+                    f"background:transparent; border:none; font-size:11px;"
+                )
+                sub_lbl.setMaximumWidth(100)
+                layout.addWidget(sub_lbl)
+
+        ghost.setStyleSheet(
+            f"QFrame {{ background-color: {self.current_theme.card_bg}; "
+            f"border: 1px solid {self.current_theme.border_color}; "
+            f"border-radius: 8px; }}"
+        )
+        ghost.setWindowOpacity(0.75)
+        ghost.move(global_pos.x() - 60, global_pos.y() - 20)
+        ghost.show()
+        self._note_drag_ghost = ghost
+
+    def _hide_note_drag_ghost(self):
+        if self._note_drag_ghost:
+            self._note_drag_ghost.hide()
+            self._note_drag_ghost.deleteLater()
+            self._note_drag_ghost = None
+
+    def _detach_note(self, release_global_pos):
+        """在释放位置创建独立便签窗口，主面板切换到新空白便签"""
+        # 先保存当前内容
+        self.note_panel.flush_on_hide()
+
+        note_id = self.note_panel.get_current_note_id()
+        if note_id is None:
+            note_id = self.note_panel.ensure_note_for_detach()
+
+        # 创建独立窗口
+        win = FloatingNoteWindow(
+            note_service=self.note_service,
+            note_id=note_id,
+            stylesheet=self.styleSheet(),
+        )
+        win.closed.connect(self._on_floating_note_closed)
+        win.move(release_global_pos.x() - 20, release_global_pos.y() - 20)
+        win.show()
+        try:
+            if self._always_on_top:
+                win.set_pinned(True)
+                win.raise_()
+            else:
+                # 默认不置顶，但拖出后应位于主窗口之上
+                win.raise_()
+        except Exception:
+            pass
+        self._floating_notes.append(win)
+
+        # 主面板新建空白便签
+        self.note_panel.start_new_note()
 
     # ========== 图钉按钮 ==========
 
@@ -304,6 +517,17 @@ class MainWindow(QMainWindow):
             pass
         # 强制设置 QPalette，防止 Active/Inactive 调色板组的默认颜色覆盖 QSS
         self._apply_theme_palette()
+        # QToolTip 有独立调色板，必须用 QToolTip.setPalette() 才能生效
+        # 放在 _apply_theme_palette() 之后，防止 QApplication.setPalette() 覆盖
+        tp = QPalette()
+        if _is_dark_color(self.current_theme.bg_color):
+            tp.setColor(QPalette.ToolTipBase, QColor("#1A1A1A"))
+            tp.setColor(QPalette.ToolTipText, QColor("#FFFFFF"))
+        else:
+            tp.setColor(QPalette.ToolTipBase, QColor("#FFFDF5"))
+            tp.setColor(QPalette.ToolTipText, QColor("#333333"))
+        QToolTip.setPalette(tp)
+        QToolTip.setFont(QFont("Microsoft YaHei", max(8, self._font_size - 2)))
         # 刷新图钉按钮图标颜色
         if hasattr(self, 'pin_btn'):
             self._update_pin_style()
@@ -324,8 +548,12 @@ class MainWindow(QMainWindow):
             palette.setColor(group, QPalette.Highlight, QColor(t.primary_color))
             palette.setColor(group, QPalette.HighlightedText, QColor("#FFFFFF"))
             palette.setColor(group, QPalette.BrightText, QColor(t.text_color))
-            palette.setColor(group, QPalette.ToolTipBase, QColor(t.card_bg))
-            palette.setColor(group, QPalette.ToolTipText, QColor(t.text_color))
+            if _is_dark_color(t.bg_color):
+                palette.setColor(group, QPalette.ToolTipBase, QColor("#1A1A1A"))
+                palette.setColor(group, QPalette.ToolTipText, QColor("#FFFFFF"))
+            else:
+                palette.setColor(group, QPalette.ToolTipBase, QColor("#FFFDF5"))
+                palette.setColor(group, QPalette.ToolTipText, QColor("#333333"))
         # PlaceholderText 在 Qt 5.12+ 可用
         try:
             for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
@@ -349,18 +577,41 @@ class MainWindow(QMainWindow):
         self.current_theme = get_theme(theme_key)
         self._apply_theme()
         self.config.set("theme.mode", theme_key)
+        self._sync_floating_note_styles()
 
     def set_bg_opacity(self, opacity: float):
         """设置背景透明度 (0.3 ~ 1.0)，文字不受影响"""
         self._bg_opacity = max(0.3, min(1.0, opacity))
         self._apply_theme()
         self.config.set("window.opacity", self._bg_opacity)
+        self._sync_floating_note_styles()
 
     def set_font_size(self, size: int):
         """设置基础字号 (10 ~ 24px)"""
         self._font_size = max(10, min(24, size))
         self._apply_theme()
+        self._sync_floating_note_styles()
         self.config.set("window.font_size", self._font_size)
+
+    def _sync_floating_note_styles(self):
+        """将当前主题样式同步推送到所有已打开的独立便签窗口"""
+        qss = self.styleSheet()
+        self._floating_notes = [w for w in self._floating_notes if w.isVisible()]
+        for win in self._floating_notes:
+            try:
+                win.setStyleSheet(qss)
+            except Exception:
+                pass
+
+    def _on_floating_note_closed(self, note_id: int):
+        """浮动便签关闭时，主窗口加载该便签而非新建空白"""
+        # 切换到便签页面
+        if self.content_stack.currentIndex() != 1:
+            self._switch_to_note()
+        # 加载刚关闭的便签（若该便签已因空内容被删除，则回到新空白便签）
+        ok = self.note_panel.load_note_by_id(note_id)
+        if not ok:
+            self.note_panel.start_new_note()
 
     # ========== 数据刷新 ==========
 
@@ -1139,6 +1390,10 @@ class MainWindow(QMainWindow):
             flags &= ~Qt.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.show()  # setWindowFlags 后需要重新 show
+        if not on_top:
+            # 取消置顶后立即降低窗口层级，使其他窗口可以覆盖
+            self.lower()
+            self.raise_()
         self.config.set("window.always_on_top", on_top)
         if hasattr(self, 'pin_btn'):
             self._update_pin_style()
@@ -1255,6 +1510,30 @@ class MainWindow(QMainWindow):
 
         et = event.type()
 
+        # ---------- 自定义 Tooltip（完全绕过系统 QToolTip） ----------
+        if et == QEvent.ToolTip:
+            # 向上找最近设置了 toolTip 的控件（子控件可能无 tooltip，父控件才有）
+            tip_text = ""
+            w = obj
+            while w is not None:
+                tip_text = w.toolTip()
+                if tip_text:
+                    break
+                if w is self:
+                    break
+                w = w.parentWidget()
+            if tip_text:
+                self._styled_tip.show_tip(
+                    QCursor.pos(), tip_text,
+                    _is_dark_color(self.current_theme.bg_color),
+                    max(8, self._font_size - 2)
+                )
+                return True  # 阻止默认 QToolTip 显示
+            return False  # 无 tooltip 文本，不拦截
+
+        if et == QEvent.Leave:
+            self._styled_tip.hide()
+
         # ---------- 鼠标移动 ----------
         if et == QEvent.MouseMove:
             # 正在缩放
@@ -1324,17 +1603,49 @@ class MainWindow(QMainWindow):
     def bring_to_front(self):
         """将窗口从隐藏/最小化/托盘状态恢复并置于前台"""
         import ctypes
-        self.show()
-        self.showNormal()
+        from PyQt5.QtWidgets import QApplication
+        
+        # 确保窗口可见且正常状态
+        if not self.isVisible():
+            self.show()
+        if self.isMinimized():
+            self.showNormal()
+            
+        # 强制激活窗口并置于前台
         self.raise_()
         self.activateWindow()
-        # 使用 Windows API 强制前台显示（绕过前台窗口限制）
+        
+        # 使用更强的Windows API强制前台显示
         try:
             hwnd = int(self.winId())
             user32 = ctypes.windll.user32
+            
+            # 强制显示窗口（SW_RESTORE）
+            user32.ShowWindow(hwnd, 9)  # 9 = SW_RESTORE
+            
+            # 确保窗口不在最下层
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)  # HWND_TOPMOST + NOSIZE | NOMOVE
+            
+            # 强制设置为前台窗口
             user32.SetForegroundWindow(hwnd)
+            
+            # 如果原本不是置顶状态，取消置顶
+            if not self._always_on_top:
+                user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002)  # HWND_NOTOPMOST + NOSIZE | NOMOVE
+                
+            # 处理窗口焦点和事件
+            QApplication.processEvents()
+            self.raise_()
+            self.activateWindow()
         except Exception:
-            pass
+            # 如果 Windows API 失败，至少确保 Qt 层面的操作
+            self.raise_()
+            self.activateWindow()
+            QApplication.processEvents()
+
+    def enterEvent(self, event):
+        """鼠标进入窗口时激活，使 QToolTip 立即可用（Qt.Tool 窗口默认不激活）"""
+        super().enterEvent(event)
 
     def closeEvent(self, event):
         """关闭窗口时最小化到托盘而不是退出"""

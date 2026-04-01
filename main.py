@@ -57,6 +57,10 @@ def _try_send_show():
         socket.waitForBytesWritten(500)
         socket.disconnectFromServer()
         return True
+    # 在 Windows 上，若已有实例以更高权限运行，可能出现 Access denied。
+    # 这种情况下也应视为“已有实例在运行”，避免再开一个新窗口。
+    if socket.error() == QLocalSocket.SocketAccessError:
+        return True
     return False
 
 
@@ -75,9 +79,23 @@ def main():
 
     # 启动本地服务器，监听后续实例的唤醒请求
     server = QLocalServer()
+    try:
+        # 放宽本地 socket 访问权限，降低因权限差异导致的连接失败概率
+        server.setSocketOptions(QLocalServer.WorldAccessOption)
+    except Exception:
+        pass
     # 清理可能残留的 socket（如上次崩溃后未清理）
     QLocalServer.removeServer(_SERVER_NAME)
-    server.listen(_SERVER_NAME)
+    if not server.listen(_SERVER_NAME):
+        # 若监听失败，优先再尝试一次连接已有实例；成功则直接退出，避免重复打开
+        if _try_send_show():
+            sys.exit(0)
+        QMessageBox.critical(
+            None,
+            "桌面待办 - 启动失败",
+            f"单实例服务启动失败：{server.errorString()}\n\n请先关闭已运行实例后重试。",
+        )
+        sys.exit(1)
 
     from src.ui.main_window import MainWindow
     window = MainWindow()
@@ -87,9 +105,13 @@ def main():
     def _on_new_connection():
         conn = server.nextPendingConnection()
         if conn:
-            conn.waitForReadyRead(500)
+            # 等待数据到达并读取
+            if conn.waitForReadyRead(1000):
+                data = bytes(conn.readAll())
+                # 检查是否是show命令
+                if data == b"show":
+                    window.bring_to_front()
             conn.close()
-        window.bring_to_front()
 
     server.newConnection.connect(_on_new_connection)
 

@@ -1,6 +1,5 @@
 """系统托盘 - 最小化到托盘、托盘右键菜单"""
 
-import sys
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 from PyQt5.QtCore import pyqtSignal, QObject
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
@@ -22,8 +21,7 @@ def _create_tray_icon() -> QIcon:
 
     # ✓ 标记
     painter.setPen(QColor("#FFFFFF"))
-    family = "Segoe UI" if sys.platform == "win32" else "Helvetica Neue"
-    font = QFont(family, 28, QFont.Bold)
+    font = QFont("Segoe UI", 28, QFont.Bold)
     painter.setFont(font)
     painter.drawText(pixmap.rect(), 0x0084, "✓")  # AlignCenter
 

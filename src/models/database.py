@@ -34,6 +34,7 @@ def init_db():
     # 导入模型以注册到 Base.metadata
     from src.models.task import Task  # noqa: F401
     from src.models.tag import Tag  # noqa: F401
+    from src.models.note import Note  # noqa: F401
     Base.metadata.create_all(engine)
     _migrate(engine)
     return engine
@@ -43,6 +44,11 @@ def _migrate(engine):
     """轻量迁移：为已有表添加新列"""
     from sqlalchemy import inspect, text
     inspector = inspect(engine)
+    # 确保 notes 表存在（create_all 已处理，此处仅保障兼容性）
+    tables = inspector.get_table_names()
+    if "notes" not in tables:
+        from src.models.note import Note  # noqa: F401
+        Base.metadata.tables["notes"].create(engine)
     task_cols = [c["name"] for c in inspector.get_columns("tasks")]
     if "is_deleted" not in task_cols:
         with engine.begin() as conn:
