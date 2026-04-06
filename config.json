@@ -1,0 +1,24 @@
+{
+    "window": {
+        "x": 1092,
+        "y": 74,
+        "width": 303,
+        "height": 573,
+        "opacity": 0.86,
+        "always_on_top": false,
+        "font_size": 13
+    },
+    "theme": {
+        "mode": "morandy",
+        "primary_color": "#6366F1",
+        "background_color": "#1E1E2E"
+    },
+    "behavior": {
+        "start_with_windows": false,
+        "minimize_to_tray": true
+    },
+    "current_filter": {
+        "type": "smart_list",
+        "value": "today"
+    }
+}
