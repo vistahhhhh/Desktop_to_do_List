@@ -31,3 +31,12 @@ Desktop.ini
 # Virtual environment
 venv/
 .env/
+build_env/
+
+# Runtime files
+config.json
+crash.log
+subtask_expand_state.json
+
+# Installer output binaries
+Output/

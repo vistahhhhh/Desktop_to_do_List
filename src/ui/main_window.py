@@ -111,8 +111,8 @@ class MainWindow(QMainWindow):
 
     def _setup_window(self):
         self._always_on_top = self.config.get("window.always_on_top", True)
-        # 使用更合适的窗口标志：去掉Qt.Tool，改用Qt.Window以获得更好的前台显示行为
-        flags = Qt.FramelessWindowHint | Qt.Window
+        # Qt.Tool 不在任务栏显示图标，保持悬浮小工具风格
+        flags = Qt.FramelessWindowHint | Qt.Tool
         if self._always_on_top:
             flags |= Qt.WindowStaysOnTopHint
         self.setWindowFlags(flags)
