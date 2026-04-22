@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QTextCharFormat, QTextBlockFormat, QTextCursor, QIcon
 from src.ui.link_dialog import make_link_pixmap
+from src.ui.task_item import _breakable
 
 
 class ElidedLabel(QLabel):
@@ -97,7 +98,7 @@ class NotePanel(QWidget):
         self.body_edit = QTextEdit()
         self.body_edit.setObjectName("NoteBodyEdit")
         self.body_edit.setPlaceholderText("开始记录…")
-        self.body_edit.setAcceptRichText(True)
+        self.body_edit.setAcceptRichText(False)
         self.body_edit.textChanged.connect(self._on_content_changed)
         self.body_edit.cursorPositionChanged.connect(self._sync_format_buttons)
         self.body_edit.setFrameShape(QFrame.NoFrame)
@@ -797,9 +798,10 @@ class NotePanel(QWidget):
                 row.setContentsMargins(4, 1, 4, 1)
                 row.setSpacing(4)
 
-                lbl = QLabel(note.display_name())
+                lbl = QLabel(_breakable(note.display_name()))
                 lbl.setObjectName("TaskTitle")
-                lbl.setWordWrap(False)
+                lbl.setWordWrap(True)
+                lbl.setMinimumWidth(0)
                 row.addWidget(lbl, 1)
 
                 restore_btn = QPushButton("恢复")

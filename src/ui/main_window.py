@@ -25,6 +25,7 @@ from src.services.note_service import NoteService
 from src.ui.floating_note import FloatingNoteWindow
 from src.services.link_service import LinkService
 from src.ui.link_dialog import LinkExistingNotesDialog, NoteLinkedTasksDialog
+from src.ui.task_item import _breakable
 
 RESIZE_MARGIN = 6
 CORNER_MARGIN = 16
@@ -220,6 +221,7 @@ class MainWindow(QMainWindow):
         self.task_list.subtask_status_changed.connect(self._on_subtask_status_changed)
         self.task_list.subtask_create_requested.connect(self._on_subtask_create)
         self.task_list.subtask_delete_requested.connect(self._on_subtask_delete)
+        self.task_list.subtask_title_changed.connect(self._on_subtask_title_changed)
         self.task_list.create_linked_note_requested.connect(self._on_create_linked_note)
         self.task_list.link_existing_note_requested.connect(self._on_link_existing_note)
         self.task_list.view_linked_notes_requested.connect(self._on_view_linked_notes)
@@ -640,7 +642,7 @@ class MainWindow(QMainWindow):
         ok = self.note_panel.load_note_by_id(note_id)
         if not ok:
             self.note_panel.start_new_note()
-        self._refresh_tasks()
+        self._refresh_all_link_badges()
 
     # ========== 数据刷新 ==========
 
@@ -688,6 +690,17 @@ class MainWindow(QMainWindow):
                                  link_count_map=link_count_map)
         # 新创建的任务项控件需要启用鼠标跟踪
         self._enable_mouse_tracking(self.task_list)
+
+    def _update_task_link_badge(self, task_id: int):
+        """仅更新指定任务的关联便签徽标，不刷新整个列表"""
+        count = self.task_service.get_task_link_count(task_id)
+        self.task_list.update_task_link_count(task_id, count)
+
+    def _refresh_all_link_badges(self):
+        """刷新当前列表中所有任务的关联便签徽标"""
+        for tid in self.task_list.get_all_task_ids():
+            count = self.task_service.get_task_link_count(tid)
+            self.task_list.update_task_link_count(tid, count)
 
     def _refresh_sidebar_tags(self):
         tags = self.tag_service.get_all_tags()
@@ -823,6 +836,10 @@ class MainWindow(QMainWindow):
         self.task_service.delete_task(subtask_id)
         self._refresh_tasks()
 
+    def _on_subtask_title_changed(self, subtask_id: int, new_title: str):
+        """分任务标题修改（UI已乐观更新，只持久化）"""
+        self.task_service.update_task(subtask_id, title=new_title)
+
     def _on_create_linked_note(self, task_id: int):
         try:
             task = self.task_service.get_task(task_id)
@@ -856,7 +873,7 @@ class MainWindow(QMainWindow):
             )
             win.closed.connect(self._on_floating_note_closed)
             win.manage_links_requested.connect(self._on_manage_note_links)
-            win.linked_note_saved.connect(lambda *_: self._refresh_tasks())
+            win.linked_note_saved.connect(lambda tid, nid: self._update_task_link_badge(tid))
             win.resize(260, 320)
             win.move(self.x() + 60, self.y() + 60)
             win.show()
@@ -865,7 +882,7 @@ class MainWindow(QMainWindow):
             if self._always_on_top:
                 win.set_pinned(True)
             self._floating_notes.append(win)
-            self._refresh_tasks()
+            self._update_task_link_badge(task_id)
         except Exception:
             self._session.rollback()
             self._show_tip("新建关联便签时发生异常")
@@ -920,7 +937,7 @@ class MainWindow(QMainWindow):
             self._on_note_linked(note_id, task_id)
         else:
             self._show_tip("关联失败")
-        self._refresh_tasks()
+        self._update_task_link_badge(task_id)
 
     def _on_view_linked_notes(self, task_id: int):
         task = self.task_service.get_task(task_id)
@@ -957,7 +974,14 @@ class MainWindow(QMainWindow):
         dialog.note_unlinked.connect(self._on_note_unlinked)
         dialog.note_linked.connect(self._on_note_linked)
         dialog.exec_()
-        self._refresh_tasks()
+        self._refresh_all_link_badges()
+
+    def _clean_linked_notes_before_delete(self, task_ids: list):
+        """删除任务前，清理关联便签的 [任务名] 前缀"""
+        for tid in task_ids:
+            linked = self.link_service.get_note_for_task(tid, include_deleted=True)
+            if linked is not None:
+                self._on_note_unlinked(linked.id)
 
     def _on_note_unlinked(self, note_id: int):
         """便签解除关联后，去除标题中的 [任务名] 前缀；若便签无实际内容则删除"""
@@ -1061,6 +1085,7 @@ class MainWindow(QMainWindow):
         if task is None:
             return
         if self._show_confirm(f"确定要删除任务「{task.title}」吗？\n删除后可在回收站恢复。"):
+            self._clean_linked_notes_before_delete([task_id])
             self.task_service.delete_task(task_id)
             self._refresh_tasks()
 
@@ -1070,6 +1095,7 @@ class MainWindow(QMainWindow):
         if count == 0:
             return
         if self._show_confirm(f"确定要删除选中的 {count} 个任务吗？\n删除后可在回收站恢复。"):
+            self._clean_linked_notes_before_delete(task_ids)
             for tid in task_ids:
                 self.task_service.delete_task(tid)
             self._refresh_tasks()
@@ -1308,9 +1334,10 @@ class MainWindow(QMainWindow):
                 text_col = QVBoxLayout()
                 text_col.setSpacing(0)
                 text_col.setContentsMargins(0, 0, 0, 0)
-                lbl = QLabel(task.title)
+                lbl = QLabel(_breakable(task.title))
                 lbl.setObjectName("TaskTitle")
-                lbl.setWordWrap(False)
+                lbl.setWordWrap(True)
+                lbl.setMinimumWidth(0)
                 text_col.addWidget(lbl)
                 if task.parent_id is not None:
                     parent_task = self.task_service.get_task_any(task.parent_id)
@@ -1448,8 +1475,9 @@ class MainWindow(QMainWindow):
                         mark.setFixedWidth(16)
                         row.addWidget(mark)
                         # 标题
-                        tlbl = QLabel(task.title)
-                        tlbl.setWordWrap(False)
+                        tlbl = QLabel(_breakable(task.title))
+                        tlbl.setWordWrap(True)
+                        tlbl.setMinimumWidth(0)
                         if task.status in ("done", "cancelled"):
                             tlbl.setObjectName("HistoryTitleDone")
                         else:

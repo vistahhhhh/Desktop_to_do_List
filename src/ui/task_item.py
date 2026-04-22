@@ -15,6 +15,11 @@ from src.ui.link_dialog import make_link_pixmap
 from src.models.task import Task
 
 
+def _breakable(text: str) -> str:
+    """Insert zero-width spaces between characters so QLabel can wrap anywhere"""
+    return '\u200b'.join(text) if text else ''
+
+
 # 状态流转映射：点击按钮直接切换 todo⇄done
 STATUS_FLOW = {
     "todo": "done",
@@ -85,6 +90,7 @@ class SubtaskItemWidget(QWidget):
     status_changed = pyqtSignal(int, str)    # subtask_id, new_status
     delete_requested = pyqtSignal(int)        # subtask_id
     add_after_requested = pyqtSignal(int)     # subtask_id：在该行后插入输入框
+    title_changed = pyqtSignal(int, str)      # subtask_id, new_title
 
     def __init__(self, subtask: Task, parent=None):
         super().__init__(parent)
@@ -105,8 +111,10 @@ class SubtaskItemWidget(QWidget):
         self._update_check_style()
         layout.addWidget(self.check_btn, 0, Qt.AlignVCenter)
 
-        self.title_label = QLabel(self.subtask.title)
-        self.title_label.setWordWrap(False)
+        self.title_label = QLabel(_breakable(self.subtask.title))
+        self.title_label.setWordWrap(True)
+        self.title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.title_label.setMinimumWidth(0)
         self._update_title_style()
         layout.addWidget(self.title_label, 1)
 
@@ -190,6 +198,54 @@ class SubtaskItemWidget(QWidget):
             return
         super().mouseMoveEvent(event)
 
+    def mouseDoubleClickEvent(self, event):
+        """双击进入编辑模式：将标题替换为输入框"""
+        if event.button() == Qt.LeftButton:
+            self._enter_edit_mode()
+        else:
+            super().mouseDoubleClickEvent(event)
+
+    def _enter_edit_mode(self):
+        """将 title_label 替换为内联输入框进行编辑"""
+        if hasattr(self, '_edit_input') and self._edit_input is not None:
+            return
+        self._edit_input = _InlineSubtaskInput()
+        self._edit_input.setObjectName("SubtaskInput")
+        self._edit_input.setText(self.subtask.title)
+        self._edit_input.selectAll()
+        self._edit_input.returnPressed.connect(self._confirm_edit)
+        self._edit_input.cancelled.connect(self._cancel_edit)
+        self._edit_input.editingFinished.connect(self._confirm_edit)
+        layout = self.layout()
+        layout.replaceWidget(self.title_label, self._edit_input)
+        self.title_label.hide()
+        self._edit_input.setFocus()
+
+    def _confirm_edit(self):
+        """确认编辑：更新标题并恢复 label"""
+        if not hasattr(self, '_edit_input') or self._edit_input is None:
+            return
+        new_title = self._edit_input.text().strip()
+        inp = self._edit_input
+        self._edit_input = None
+        self.layout().replaceWidget(inp, self.title_label)
+        inp.deleteLater()
+        self.title_label.show()
+        if new_title and new_title != self.subtask.title:
+            self.subtask.title = new_title
+            self.title_label.setText(_breakable(new_title))
+            self.title_changed.emit(self.subtask.id, new_title)
+
+    def _cancel_edit(self):
+        """取消编辑：恢复 label，不保存"""
+        if not hasattr(self, '_edit_input') or self._edit_input is None:
+            return
+        inp = self._edit_input
+        self._edit_input = None
+        self.layout().replaceWidget(inp, self.title_label)
+        inp.deleteLater()
+        self.title_label.show()
+
     def mouseReleaseEvent(self, event):
         self._drag_start = None
         super().mouseReleaseEvent(event)
@@ -205,6 +261,7 @@ class SubtaskSection(QWidget):
     subtask_status_changed = pyqtSignal(int, str)    # subtask_id, new_status
     subtask_create_requested = pyqtSignal(int, str)  # parent_task_id, title
     subtask_delete_requested = pyqtSignal(int)        # subtask_id
+    subtask_title_changed = pyqtSignal(int, str)      # subtask_id, new_title
 
     def __init__(self, parent_task_id: int, subtasks: list, parent=None):
         super().__init__(parent)
@@ -233,6 +290,7 @@ class SubtaskSection(QWidget):
         item.status_changed.connect(self.subtask_status_changed)
         item.delete_requested.connect(self.subtask_delete_requested)
         item.add_after_requested.connect(self._show_input_after)
+        item.title_changed.connect(self.subtask_title_changed)
         return item
 
     def _update_add_btn_visibility(self):
@@ -357,6 +415,7 @@ class TaskItemWidget(QFrame):
     subtask_status_changed = pyqtSignal(int, str)    # subtask_id, new_status
     subtask_create_requested = pyqtSignal(int, str)  # parent_id, title
     subtask_delete_requested = pyqtSignal(int)        # subtask_id
+    subtask_title_changed = pyqtSignal(int, str)      # subtask_id, new_title
     create_linked_note_requested = pyqtSignal(int)    # task_id
     link_existing_note_requested = pyqtSignal(int)    # task_id
     view_linked_notes_requested = pyqtSignal(int)     # task_id
@@ -392,7 +451,7 @@ class TaskItemWidget(QFrame):
 
         if self._is_carryover:
             self.status_btn = None
-            self.title_label = QLabel(self.task.title)
+            self.title_label = QLabel(_breakable(self.task.title))
             self.title_label.setWordWrap(True)
             self.title_label.setObjectName("TaskTitleCarryover")
             layout.addWidget(self.title_label, 1)
@@ -407,7 +466,7 @@ class TaskItemWidget(QFrame):
 
         elif self._is_week_overdue:
             self.status_btn = None
-            self.title_label = QLabel(self.task.title)
+            self.title_label = QLabel(_breakable(self.task.title))
             self.title_label.setWordWrap(True)
             self.title_label.setObjectName("TaskTitleCarryover")
             layout.addWidget(self.title_label, 1)
@@ -428,7 +487,7 @@ class TaskItemWidget(QFrame):
             self._update_status_style()
             layout.addWidget(self.status_btn, 0, Qt.AlignVCenter)
 
-            self.title_label = QLabel(self.task.title)
+            self.title_label = QLabel(_breakable(self.task.title))
             self.title_label.setWordWrap(True)
             self.title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             self._update_title_style()
@@ -530,6 +589,8 @@ class TaskItemWidget(QFrame):
             self.subtask_create_requested)
         self._subtask_section.subtask_delete_requested.connect(
             self.subtask_delete_requested)
+        self._subtask_section.subtask_title_changed.connect(
+            self.subtask_title_changed)
         self.layout().addWidget(self._subtask_section)
         if not self._subtasks_expanded:
             self._subtask_section.setVisible(False)
@@ -544,6 +605,8 @@ class TaskItemWidget(QFrame):
                 self.subtask_create_requested)
             self._subtask_section.subtask_delete_requested.connect(
                 self.subtask_delete_requested)
+            self._subtask_section.subtask_title_changed.connect(
+                self.subtask_title_changed)
             self.layout().addWidget(self._subtask_section)
         self._subtask_section.setVisible(True)
         self._subtasks_expanded = True
@@ -728,7 +791,7 @@ class TaskItemWidget(QFrame):
     def update_task(self, task: Task):
         """更新任务数据并刷新显示"""
         self.task = task
-        self.title_label.setText(task.title)
+        self.title_label.setText(_breakable(task.title))
         self._update_status_style()
         self._update_title_style()
         self._update_date_label()

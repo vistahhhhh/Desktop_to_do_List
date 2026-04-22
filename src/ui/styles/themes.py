@@ -324,7 +324,6 @@ def build_stylesheet(theme: Theme, bg_opacity: float = None,
     }}
     #TaskCard[selected="true"] {{
         background-color: {hex_to_rgba(theme.hover_color, 0.5)};
-        border-left: 2px solid {theme.primary_color};
     }}
     #TaskTitle {{
         font-size: {fs}px;

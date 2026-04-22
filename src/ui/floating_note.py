@@ -164,7 +164,7 @@ class FloatingNoteWindow(QWidget):
         self.body_edit = QTextEdit()
         self.body_edit.setObjectName("FloatingNoteBodyEdit")
         self.body_edit.setPlaceholderText("开始记录…")
-        self.body_edit.setAcceptRichText(True)
+        self.body_edit.setAcceptRichText(False)
         self.body_edit.textChanged.connect(self._on_content_changed)
         self.body_edit.cursorPositionChanged.connect(self._sync_fmt_btns)
         self.body_edit.setFrameShape(QFrame.NoFrame)

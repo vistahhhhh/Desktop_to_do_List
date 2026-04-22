@@ -98,6 +98,7 @@ class TaskListWidget(QWidget):
     subtask_status_changed = pyqtSignal(int, str)    # subtask_id, new_status
     subtask_create_requested = pyqtSignal(int, str)  # parent_id, title
     subtask_delete_requested = pyqtSignal(int)        # subtask_id
+    subtask_title_changed = pyqtSignal(int, str)      # subtask_id, new_title
     create_linked_note_requested = pyqtSignal(int)    # task_id
     link_existing_note_requested = pyqtSignal(int)    # task_id
     view_linked_notes_requested = pyqtSignal(int)     # task_id
@@ -192,6 +193,7 @@ class TaskListWidget(QWidget):
             item.subtask_status_changed.connect(self._on_subtask_status_changed)
             item.subtask_create_requested.connect(self._on_subtask_create)
             item.subtask_delete_requested.connect(self._on_subtask_delete)
+            item.subtask_title_changed.connect(self._on_subtask_title_changed)
             item.create_linked_note_requested.connect(self._on_create_linked_note)
             item.link_existing_note_requested.connect(self._on_link_existing_note)
             item.view_linked_notes_requested.connect(self._on_view_linked_notes)
@@ -289,6 +291,9 @@ class TaskListWidget(QWidget):
     def _on_subtask_delete(self, subtask_id):
         self.subtask_delete_requested.emit(subtask_id)
 
+    def _on_subtask_title_changed(self, subtask_id, new_title):
+        self.subtask_title_changed.emit(subtask_id, new_title)
+
     def _on_create_linked_note(self, task_id):
         self.create_linked_note_requested.emit(task_id)
 
@@ -310,6 +315,16 @@ class TaskListWidget(QWidget):
 
     def is_empty(self):
         return self._is_empty
+
+    def update_task_link_count(self, task_id: int, count: int):
+        """仅更新指定任务的关联便签徽标，不刷新整个列表"""
+        widget = self._task_widgets.get(task_id)
+        if widget:
+            widget.set_link_count(count)
+
+    def get_all_task_ids(self) -> list:
+        """返回当前列表中所有任务 ID"""
+        return list(self._task_widgets.keys())
 
     def _on_container_click(self, event):
         """点击列表空白处取消选中"""

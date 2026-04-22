@@ -21,6 +21,14 @@ class FilterService:
     # 已完成排到最后
     _done_last = case((Task.status == Task.STATUS_DONE, 1), else_=0)
 
+    # 优先级排序：high(红)=0 排最前，medium(黄)=1，low(绿)=2 排最后
+    _priority_order = case(
+        (Task.priority == 'high', 0),
+        (Task.priority == 'medium', 1),
+        (Task.priority == 'low', 2),
+        else_=3
+    )
+
     def get_today_tasks(self) -> List[Task]:
         """
         今日待办：task_date==今天的短期任务 + 遗留未完成任务。
@@ -38,7 +46,7 @@ class FilterService:
                 Task.is_deleted != 1,
                 Task.parent_id.is_(None),
             )
-            .order_by(self._done_last, Task.priority.desc(), Task.created_at.desc())
+            .order_by(self._done_last, self._priority_order, Task.created_at.desc())
             .all()
         )
         # 遗留任务（过去未完成的）
@@ -51,7 +59,7 @@ class FilterService:
                 Task.is_deleted != 1,
                 Task.parent_id.is_(None),
             )
-            .order_by(Task.task_date.asc(), Task.priority.desc())
+            .order_by(Task.task_date.asc(), self._priority_order)
             .all()
         )
         return carryover + today_tasks
@@ -69,7 +77,7 @@ class FilterService:
                 Task.is_deleted != 1,
                 Task.parent_id.is_(None),
             )
-            .order_by(self._done_last, Task.due_date.asc(), Task.priority.desc())
+            .order_by(self._done_last, Task.due_date.asc(), self._priority_order)
             .all()
         )
 
@@ -86,7 +94,7 @@ class FilterService:
                 Task.is_deleted != 1,
                 Task.parent_id.is_(None),
             )
-            .order_by(self._done_last, Task.due_date.asc(), Task.priority.desc())
+            .order_by(self._done_last, Task.due_date.asc(), self._priority_order)
             .all()
         )
 
@@ -136,7 +144,7 @@ class FilterService:
             .filter(Task.status.in_([Task.STATUS_TODO, Task.STATUS_IN_PROGRESS]),
                     Task.is_deleted != 1,
                     Task.parent_id.is_(None))
-            .order_by(Task.priority.desc(), Task.created_at.desc())
+            .order_by(self._priority_order, Task.created_at.desc())
             .all()
         )
 
